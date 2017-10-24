@@ -1,33 +1,27 @@
 %global gem_name excon
-
-# This will enable test on the future
-# and also added it depdendencies
-%global with_test 0
+%global need_bootstrap 1
 
 Name: rubygem-%{gem_name}
-Version: 0.54.0
-Release: 4%{?dist}
+Version: 0.58.0
+Release: 2%{?dist}
 Summary: Usable, fast, simple HTTP 1.1 for Ruby
 Group: Development/Languages
 License: MIT
 URL: https://github.com/excon/excon
 Source0: https://rubygems.org/gems/%{gem_name}-%{version}.gem
-# Update expired certificates.
-# https://github.com/excon/excon/commit/6a6a30ac9e68ea54f7fd4774bf304074bfd4e505
-Patch0: excon-0.54.0-update-self-signed-certs-to-fix-tests.patch
-BuildRequires: ruby(release)
+Requires: ruby(release)
+Requires: ruby(rubygems)
+Requires: ca-certificates
 BuildRequires: rubygems-devel
-BuildRequires: ruby
-%if 0%{?with_test}
-BuildRequires: %{_bindir}/rackup
-BuildRequires: %{_bindir}/shindo
+BuildRequires: ca-certificates
+%if 0%{?need_bootstrap} < 1
+# For the tests
 BuildRequires: rubygem(activesupport)
 BuildRequires: rubygem(delorean)
 BuildRequires: rubygem(eventmachine)
 BuildRequires: rubygem(open4)
-BuildRequires: rubygem(puma)
+BuildRequires: rubygem(shindo)
 BuildRequires: rubygem(sinatra)
-BuildRequires: rubygem(rspec)
 %endif
 BuildArch: noarch
 
@@ -49,99 +43,82 @@ BuildArch: noarch
 Documentation for %{name}.
 
 %prep
-%setup -q -c -T
-%gem_install -n %{SOURCE0}
+gem unpack %{SOURCE0}
 
-pushd .%{gem_instdir}
-%patch0 -p1
-sed -i -e 's/\/usr\/bin\/env ruby/\/usr\/bin\/ruby/g' ./tests/servers/eof.rb
-sed -i -e 's/\/usr\/bin\/env ruby/\/usr\/bin\/ruby/g' ./tests/servers/good.rb
-sed -i -e 's/\/usr\/bin\/env ruby/\/usr\/bin\/ruby/g' ./tests/servers/error.rb
-sed -i -e 's/\/usr\/bin\/env ruby/\/usr\/bin\/ruby/g' ./tests/servers/bad.rb
+%setup -q -D -T -n  %{gem_name}-%{version}
 
-popd
+gem spec %{SOURCE0} -l --ruby > %{gem_name}.gemspec
 
-# Use system crypto policies.
-# https://fedoraproject.org/wiki/Packaging:CryptoPolicies
-sed -i "/ciphers/ s/'.*'/'PROFILE=SYSTEM'/" .%{gem_libdir}/excon/constants.rb
 %build
+gem build %{gem_name}.gemspec
+
+%gem_install
 
 %install
+rm -rf %{buildroot}
 mkdir -p %{buildroot}%{gem_dir}
-cp -a .%{gem_dir}/* \
-        %{buildroot}%{gem_dir}/
+cp -a .%{gem_dir}/* %{buildroot}%{gem_dir}/
 
-# Kill bundled cacert.pem
-rm -rf %{buildroot}%{gem_instdir}/data
+# kill bundled cacert.pem
+ln -sf %{_sysconfdir}/pki/tls/cert.pem \
+       %{buildroot}%{gem_instdir}/data/cacert.pem
 
 %check
+%if 0%{?need_bootstrap} < 1
 pushd .%{gem_instdir}
-%if 0%{?with_test}
-# Unicorn is not available in Fedora yet (rhbz#1065685).
-sed -i '/if plugin == :unicorn/ i\  before { skip("until #{plugin} is in Fedora") } if plugin == :unicorn' spec/support/shared_contexts/test_server_context.rb
-sed -i '/with_unicorn/ s/^/  pending\n\n/' tests/{basic_tests.rb,proxy_tests.rb}
-
-# spec_helper is not required on all places.
-# https://github.com/excon/excon/pull/610
-# time must be required for some tests.
-# https://github.com/excon/excon/pull/611
-rspec -rspec_helper -rtime spec
-
 # Don't use Bundler.
 sed -i "/'bundler\/setup'/ s/^/#/" tests/test_helper.rb
 
-# This would require Sinatra 2.x+ or sinatra-contrib.
- sed -i '/redirecting_with_cookie.ru/,/^  end/ s/^/#/' tests/middlewares/capture_cookies_tests.rb
-%endif
-#shindo
+# Unicorn is not available in Fedora yet (rhbz#1065685).
+sed -i '/with_unicorn/ s/^/  pending\n\n/' tests/basic_tests.rb
+
+shindo
 popd
+%endif
 
 %files
 %dir %{gem_instdir}
 %license %{gem_instdir}/LICENSE.md
+%{gem_instdir}/benchmarks
+%{gem_instdir}/data
 %{gem_libdir}
 %exclude %{gem_cache}
 %{gem_spec}
 
 %files doc
 %doc %{gem_docdir}
-%doc %{gem_instdir}/CONTRIBUT*
-%{gem_instdir}/Gemfile*
+%doc %{gem_instdir}/CONTRIBUTING.md
+%doc %{gem_instdir}/CONTRIBUTORS.md
+%{gem_instdir}/Gemfile
+%{gem_instdir}/Gemfile.lock
 %doc %{gem_instdir}/README.md
 %{gem_instdir}/Rakefile
-%{gem_instdir}/benchmarks
 %doc %{gem_instdir}/changelog.txt
 %{gem_instdir}/excon.gemspec
 %{gem_instdir}/spec
 %{gem_instdir}/tests
 
 %changelog
-* Mon Oct 23 2017 Juan Badia Payno <jbadiapa@redhat.com> - 0.54.0-4
-- Imported to CentOS
+* Thu Oct 26 2017 Sandro Bonazzola <sbonazzo@redhat.com> - 0.58.0-2
+- Rebased on top of RDO reviewed specfile
 
-* Thu Jul 27 2017 Fedora Release Engineering <releng@fedoraproject.org> - 0.54.0-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Mass_Rebuild
+* Thu Aug 17 2017 Richard Megginson <rmeggins@localhost.localdomain> - 0.58.0-1
+- Update to excon 0.58.0
 
-* Sat Feb 11 2017 Fedora Release Engineering <releng@fedoraproject.org> - 0.54.0-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_26_Mass_Rebuild
+* Thu Jun 29 2017 Rich Megginson <rmeggins@redhat.com> - 0.57.0-1
+- Update to excon 0.57.0
 
-* Thu Jan 05 2017 Vít Ondruch <vondruch@redhat.com> - 0.54.0-1
-- Update to excon 0.54.0.
+* Tue Oct 18 2016 Rich Megginson <rmeggins@redhat.com> - 0.54.0-1
+- Update to excon 0.54.0
 
-* Thu Sep 08 2016 Vít Ondruch <vondruch@redhat.com> - 0.52.0-1
-- Update to excon 0.52.0.
+* Wed Sep 28 2016 Rich Megginson <rmeggins@redhat.com> - 0.53.0-1
+- Update to excon 0.53.0
 
-* Thu Feb 04 2016 Fedora Release Engineering <releng@fedoraproject.org> - 0.45.4-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_24_Mass_Rebuild
+* Fri Sep 16 2016 Rich Megginson <rmeggins@redhat.com> - 0.52.0-1
+- Update to excon 0.52.0
 
-* Wed Oct 21 2015 Vít Ondruch <vondruch@redhat.com> - 0.45.4-1
-- Update to excon 0.45.4.
-
-* Thu Jun 18 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 0.45.1-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
-
-* Fri Mar 27 2015 Vít Ondruch <vondruch@redhat.com> - 0.45.1-1
-- Update to excon 0.45.1.
+* Fri Dec 19 2014 Troy Dawson <tdawson@redhat.com> - 0.8.0-9
+- Update spec to work in EPEL7
 
 * Mon Sep 29 2014 Brett Lentz <blentz@redhat.com> - 0.39.6-1
 - Update to excon 0.39.6.
